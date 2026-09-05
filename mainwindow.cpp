@@ -10,13 +10,43 @@
 #include <QComboBox>
 #include <QPushButton>
 #include <QOverload>
+#include <QSettings>
+#include <QClipboard>
+#include <QApplication>
+#include <QMessageBox>
+#include <QRegularExpression>
+#include <QTime>
+#include <QTabWidget>
+#include <QScrollArea>
+#include <QStatusBar>
+#include <QListWidget>
+
+// ========== 平台适配 ==========
+#ifdef Q_OS_ANDROID
+static const int NUM_BTN_HEIGHT = 48;
+static const int BTN_HEIGHT = 44;
+#else
+static const int NUM_BTN_HEIGHT = 44;
+static const int BTN_HEIGHT = 48;
+#endif
 
 // ============================================================
 //  构造函数
 // ============================================================
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setWindowTitle("图形面体积计算器");
-    resize(420, 680);
+
+#ifdef Q_OS_ANDROID
+    showMaximized();
+#else
+    resize(480, 800);
+#endif
+
+    // ==================== 计算器页面 ====================
+    QWidget* calcPage = new QWidget();
+    QVBoxLayout* calcLayout = new QVBoxLayout(calcPage);
+    calcLayout->setSpacing(8);
+    calcLayout->setContentsMargins(10, 10, 10, 10);
 
     // ---------- 标题 ----------
     QLabel* title = new QLabel("📐 图形面体积计算器");
@@ -25,28 +55,23 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     f.setPointSize(20);
     f.setBold(true);
     title->setFont(f);
+    calcLayout->addWidget(title);
 
-    // ---------- 图形选择（下拉框）----------
+    // ---------- 图形选择 ----------
     graphCombo = new QComboBox();
     graphCombo->setMinimumHeight(36);
     graphCombo->setStyleSheet("font-size: 15px; padding: 4px;");
     graphCombo->addItems({
-        "正方形（面积）",
-        "长方形（面积）",
-        "平行四边形（面积）",
-        "梯形（面积）",
-        "圆形（面积）",
-        "正方体（体积）",
-        "长方体（体积）",
-        "圆柱体（体积）",
-        "圆锥体（体积）",
-        "球体（体积）"
+        "正方形（面积）", "长方形（面积）", "平行四边形（面积）",
+        "梯形（面积）", "圆形（面积）", "正方体（体积）",
+        "长方体（体积）", "圆柱体（体积）", "圆锥体（体积）", "球体（体积）"
     });
 
     QGroupBox* graphBox = new QGroupBox("选择图形");
     QVBoxLayout* comboLayout = new QVBoxLayout();
     comboLayout->addWidget(graphCombo);
     graphBox->setLayout(comboLayout);
+    calcLayout->addWidget(graphBox);
 
     // ---------- 参数输入区 ----------
     label1 = new QLabel("参数1：");
@@ -56,15 +81,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     edit1 = new QLineEdit(); edit1->setAlignment(Qt::AlignRight);
     edit2 = new QLineEdit(); edit2->setAlignment(Qt::AlignRight);
     edit3 = new QLineEdit(); edit3->setAlignment(Qt::AlignRight);
-    // 不再只读，支持手动键盘输入
-    edit1->setPlaceholderText("点击此处或选标签后输入");
-    edit2->setPlaceholderText("点击此处或选标签后输入");
-    edit3->setPlaceholderText("点击此处或选标签后输入");
+    edit1->setPlaceholderText("点击标签后输入");
+    edit2->setPlaceholderText("点击标签后输入");
+    edit3->setPlaceholderText("点击标签后输入");
     edit1->setMinimumHeight(32); edit2->setMinimumHeight(32); edit3->setMinimumHeight(32);
 
-    label1->setStyleSheet("padding: 4px; border-radius: 4px;");
-    label2->setStyleSheet("padding: 4px; border-radius: 4px;");
-    label3->setStyleSheet("padding: 4px; border-radius: 4px;");
+    label1->setStyleSheet("padding: 4px; border-radius: 4px; font-size: 14px;");
+    label2->setStyleSheet("padding: 4px; border-radius: 4px; font-size: 14px;");
+    label3->setStyleSheet("padding: 4px; border-radius: 4px; font-size: 14px;");
 
     label1->setProperty("paramIndex", 0);
     label2->setProperty("paramIndex", 1);
@@ -72,119 +96,170 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     label1->installEventFilter(this);
     label2->installEventFilter(this);
     label3->installEventFilter(this);
-    // 编辑框也装 eventFilter，获得焦点时自动切换激活参数
     edit1->installEventFilter(this);
     edit2->installEventFilter(this);
     edit3->installEventFilter(this);
 
     QFormLayout* paramLayout = new QFormLayout();
+    paramLayout->setSpacing(6);
     paramLayout->addRow(label1, edit1);
     paramLayout->addRow(label2, edit2);
     paramLayout->addRow(label3, edit3);
 
-    QGroupBox* paramBox = new QGroupBox("参数输入（可手动打字或点标签后用数字键）");
+    QGroupBox* paramBox = new QGroupBox("参数输入");
+    paramBox->setStyleSheet("QGroupBox { font-size: 14px; }");
     paramBox->setLayout(paramLayout);
+    calcLayout->addWidget(paramBox);
 
-    // ---------- 数字键盘 ----------
+    // ---------- 数字键盘（4行，无退位） ----------
     QGridLayout* numGrid = new QGridLayout();
     numGrid->setSpacing(6);
 
     for (int i = 1; i <= 9; ++i) {
         QPushButton* btn = new QPushButton(QString::number(i));
-        btn->setMinimumHeight(44);
+        btn->setMinimumHeight(NUM_BTN_HEIGHT);
         btn->setStyleSheet("QPushButton { background: #fff; border: 2px solid #ddd; border-radius: 8px; font-size: 18px; font-weight: bold; }"
                            "QPushButton:pressed { background: #cce; }");
         connect(btn, &QPushButton::clicked, this, &MainWindow::onDigitClicked);
         numGrid->addWidget(btn, (i-1)/3, (i-1)%3);
     }
+
     QPushButton* btn0 = new QPushButton("0");
-    btn0->setMinimumHeight(44);
+    btn0->setMinimumHeight(NUM_BTN_HEIGHT);
     btn0->setStyleSheet("QPushButton { background: #fff; border: 2px solid #ddd; border-radius: 8px; font-size: 18px; font-weight: bold; }"
                         "QPushButton:pressed { background: #cce; }");
     connect(btn0, &QPushButton::clicked, this, &MainWindow::onDigitClicked);
     numGrid->addWidget(btn0, 3, 0);
 
     QPushButton* btnDot = new QPushButton(".");
-    btnDot->setMinimumHeight(44);
+    btnDot->setMinimumHeight(NUM_BTN_HEIGHT);
     btnDot->setStyleSheet("QPushButton { background: #fff; border: 2px solid #ddd; border-radius: 8px; font-size: 18px; font-weight: bold; }"
                           "QPushButton:pressed { background: #cce; }");
     connect(btnDot, &QPushButton::clicked, this, &MainWindow::onDotClicked);
     numGrid->addWidget(btnDot, 3, 1);
 
-    QPushButton* btnBack = new QPushButton("←");
-    btnBack->setMinimumHeight(44);
-    btnBack->setStyleSheet("QPushButton { background: #ffcccb; border: 2px solid #f99; border-radius: 8px; font-size: 18px; font-weight: bold; }"
-                           "QPushButton:pressed { background: #f99; }");
-    connect(btnBack, &QPushButton::clicked, this, &MainWindow::onBackspaceClicked);
-    numGrid->addWidget(btnBack, 3, 2);
-
+    // C 按钮（占原退位位置）
     QPushButton* btnClearInput = new QPushButton("C");
-    btnClearInput->setMinimumHeight(44);
+    btnClearInput->setMinimumHeight(NUM_BTN_HEIGHT);
     btnClearInput->setStyleSheet("QPushButton { background: #ffeb99; border: 2px solid #f0c040; border-radius: 8px; font-size: 18px; font-weight: bold; }"
                                  "QPushButton:pressed { background: #f0c040; }");
     connect(btnClearInput, &QPushButton::clicked, this, &MainWindow::onClearInputClicked);
-    numGrid->addWidget(btnClearInput, 4, 0, 1, 3);
+    numGrid->addWidget(btnClearInput, 3, 2);
 
     QGroupBox* numBox = new QGroupBox("数字键盘");
+    numBox->setStyleSheet("QGroupBox { font-size: 14px; }");
     numBox->setLayout(numGrid);
+    calcLayout->addWidget(numBox);
 
     // ---------- 计算 / 清空按钮 ----------
     QPushButton* calcBtn  = new QPushButton("计 算");
     QPushButton* clearBtn = new QPushButton("全部清空");
-    calcBtn->setMinimumHeight(48);
-    clearBtn->setMinimumHeight(48);
+    calcBtn->setMinimumHeight(BTN_HEIGHT);
+    clearBtn->setMinimumHeight(BTN_HEIGHT);
     calcBtn->setStyleSheet("QPushButton { background: #5b8def; color: white; border-radius: 9px; font-size: 18px; font-weight: bold; }");
     clearBtn->setStyleSheet("QPushButton { background: #ccc; color: #333; border-radius: 9px; font-size: 16px; }");
     connect(calcBtn,  &QPushButton::clicked, this, &MainWindow::onCalculate);
     connect(clearBtn, &QPushButton::clicked, this, &MainWindow::onClearAll);
 
     QHBoxLayout* btnLayout = new QHBoxLayout();
+    btnLayout->setSpacing(10);
     btnLayout->addWidget(calcBtn);
     btnLayout->addWidget(clearBtn);
+    calcLayout->addLayout(btnLayout);
 
     // ---------- 结果显示 ----------
     resultLabel = new QLabel("请先选择一个图形");
     resultLabel->setWordWrap(true);
     resultLabel->setStyleSheet("font-size: 14px; padding: 10px; background: #f5f5f5; border-radius: 6px;");
+
+    btnCopy = new QPushButton("📋复制");
+    btnCopy->setMinimumHeight(32);
+    btnCopy->setStyleSheet("QPushButton { background: #5b8def; color: white; border-radius: 6px; font-size: 12px; padding: 4px 8px; }");
+    connect(btnCopy, &QPushButton::clicked, this, &MainWindow::onCopyResult);
+
+    QHBoxLayout* resultTopLayout = new QHBoxLayout();
+    resultTopLayout->addWidget(resultLabel, 1);
+    resultTopLayout->addWidget(btnCopy);
+
     QGroupBox* resultBox = new QGroupBox("计算结果");
     QVBoxLayout* resultBoxLayout = new QVBoxLayout();
-    resultBoxLayout->addWidget(resultLabel);
+    resultBoxLayout->addLayout(resultTopLayout);
     resultBox->setLayout(resultBoxLayout);
+    calcLayout->addWidget(resultBox);
 
-    // ---------- 底部信息 ----------
-    QLabel* footer = new QLabel(
-        "版本：v0.0.1-rc1\n"
-        "开发者：Byjsmc\n"
-        "最后更新于：2026/09/03"
-        );
-    footer->setStyleSheet("color: gray; font-size: 11px;");
-    footer->setWordWrap(true);
-    footer->setAlignment(Qt::AlignCenter);
+    // ---------- 安卓端滚动包裹 ----------
+#ifdef Q_OS_ANDROID
+    QScrollArea* calcScroll = new QScrollArea();
+    calcScroll->setWidgetResizable(true);
+    calcScroll->setWidget(calcPage);
+    calcScroll->setFrameShape(QFrame::NoFrame);
+#endif
 
-    // ---------- 主布局 ----------
-    QWidget* central = new QWidget();
-    QVBoxLayout* mainLayout = new QVBoxLayout(central);
-    mainLayout->setSpacing(8);
-    mainLayout->addWidget(title);
-    mainLayout->addWidget(graphBox);
-    mainLayout->addWidget(paramBox);
-    mainLayout->addWidget(numBox);
-    mainLayout->addLayout(btnLayout);
-    mainLayout->addWidget(resultBox);
-    mainLayout->addStretch();
-    mainLayout->addWidget(footer);
-    setCentralWidget(central);
+    // ==================== 历史记录页面 ====================
+    QWidget* historyPage = new QWidget();
+    QVBoxLayout* historyPageLayout = new QVBoxLayout(historyPage);
+
+    historyList = new QListWidget();
+    historyList->setStyleSheet("font-size: 14px;");
+    connect(historyList, &QListWidget::itemClicked, this, &MainWindow::onHistoryItemClicked);
+
+    btnDeleteHistory = new QPushButton("❌ 删除选中记录");
+    btnDeleteHistory->setEnabled(false);
+    btnDeleteHistory->setMinimumHeight(40);
+    btnDeleteHistory->setStyleSheet("QPushButton { background: #ff6b6b; color: white; border-radius: 8px; font-size: 14px; }");
+    connect(btnDeleteHistory, &QPushButton::clicked, this, &MainWindow::onDeleteHistory);
+
+    btnClearAllHistory = new QPushButton("❌ 清除全部历史记录");
+    btnClearAllHistory->setEnabled(false);
+    btnClearAllHistory->setMinimumHeight(40);
+    btnClearAllHistory->setStyleSheet("QPushButton { background: #ff4444; color: white; border-radius: 8px; font-size: 14px; }");
+    connect(btnClearAllHistory, &QPushButton::clicked, this, &MainWindow::onClearAllHistory);
+
+    QHBoxLayout* historyBtnLayout = new QHBoxLayout();
+    historyBtnLayout->addWidget(btnDeleteHistory);
+    historyBtnLayout->addWidget(btnClearAllHistory);
+
+    historyPageLayout->addWidget(historyList);
+    historyPageLayout->addLayout(historyBtnLayout);
+
+    // ==================== TabWidget ====================
+    QTabWidget* tabWidget = new QTabWidget();
+    tabWidget->setStyleSheet("QTabBar::tab { height: 38px; font-size: 14px; padding: 4px 14px; }");
+#ifdef Q_OS_ANDROID
+    tabWidget->addTab(calcScroll, "🧮 计算器");
+#else
+    tabWidget->addTab(calcPage, "🧮 计算器");
+#endif
+    tabWidget->addTab(historyPage, "📋 历史记录");
+    setCentralWidget(tabWidget);
+
+    // ---------- 底部状态栏（版本信息居中） ----------
+    QStatusBar* statusBar = this->statusBar();
+    statusBar->setStyleSheet("font-size: 11px;");
+
+    QLabel* versionLabel = new QLabel("版本：v0.0.1 | 开发者：Byjsmc | 最后更新于：2026/09/05");
+    versionLabel->setStyleSheet("color: gray;");
+    versionLabel->setAlignment(Qt::AlignCenter);
+
+    QWidget* spacerLeft = new QWidget();
+    spacerLeft->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    QWidget* spacerRight = new QWidget();
+    spacerRight->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+
+    statusBar->addWidget(spacerLeft, 1);
+    statusBar->addWidget(versionLabel, 0);
+    statusBar->addWidget(spacerRight, 1);
 
     // 默认隐藏参数
     label1->hide(); edit1->hide();
     label2->hide(); edit2->hide();
     label3->hide(); edit3->hide();
 
-    // 连接下拉框信号
     connect(graphCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &MainWindow::onGraphChanged);
 
-    // 初始刷新
+    loadConfig();
+    loadHistory();
     onGraphChanged(-1);
 }
 
@@ -192,7 +267,6 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 //  eventFilter：标签点击 + 编辑框焦点
 // ============================================================
 bool MainWindow::eventFilter(QObject* obj, QEvent* event) {
-    // 标签点击
     if (event->type() == QEvent::MouseButtonPress) {
         QLabel* label = qobject_cast<QLabel*>(obj);
         if (label && (label == label1 || label == label2 || label == label3)) {
@@ -203,7 +277,6 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* event) {
             return true;
         }
     }
-    // 编辑框获得焦点
     if (event->type() == QEvent::FocusIn) {
         if (obj == edit1)      { activeParam = 0; updateLabelHighlight(); }
         else if (obj == edit2) { activeParam = 1; updateLabelHighlight(); }
@@ -213,14 +286,16 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* event) {
 }
 
 // ============================================================
-//  图形切换（下拉框）
+//  图形切换
 // ============================================================
 void MainWindow::onGraphChanged(int index) {
     int id = index;
     if (id < 0) return;
 
     activeParam = -1;
-    label1->setStyleSheet(""); label2->setStyleSheet(""); label3->setStyleSheet("");
+    label1->setStyleSheet("padding: 4px; border-radius: 4px; font-size: 14px;");
+    label2->setStyleSheet("padding: 4px; border-radius: 4px; font-size: 14px;");
+    label3->setStyleSheet("padding: 4px; border-radius: 4px; font-size: 14px;");
     label1->hide(); edit1->hide(); edit1->clear();
     label2->hide(); edit2->hide(); edit2->clear();
     label3->hide(); edit3->hide(); edit3->clear();
@@ -238,7 +313,6 @@ void MainWindow::onGraphChanged(int index) {
     case 9: label1->setText("半径："); label1->show(); edit1->show(); break;
     }
 
-    // 自动激活第一个参数
     activeParam = 0;
     updateLabelHighlight();
     resultLabel->setText("请直接输入参数，或点击标签后用数字键盘输入");
@@ -248,10 +322,12 @@ void MainWindow::onGraphChanged(int index) {
 //  高亮更新
 // ============================================================
 void MainWindow::updateLabelHighlight() {
-    label1->setStyleSheet(""); label2->setStyleSheet(""); label3->setStyleSheet("");
-    if (activeParam == 0)      label1->setStyleSheet("background: #5b8def; color: white; padding: 4px; border-radius: 4px;");
-    else if (activeParam == 1) label2->setStyleSheet("background: #5b8def; color: white; padding: 4px; border-radius: 4px;");
-    else if (activeParam == 2) label3->setStyleSheet("background: #5b8def; color: white; padding: 4px; border-radius: 4px;");
+    QString base = "padding: 4px; border-radius: 4px; font-size: 14px;";
+    label1->setStyleSheet(base); label2->setStyleSheet(base); label3->setStyleSheet(base);
+    QString active = "background: #5b8def; color: white; padding: 4px; border-radius: 4px; font-size: 14px;";
+    if (activeParam == 0)      label1->setStyleSheet(active);
+    else if (activeParam == 1) label2->setStyleSheet(active);
+    else if (activeParam == 2) label3->setStyleSheet(active);
 }
 
 // ============================================================
@@ -270,13 +346,6 @@ void MainWindow::onDotClicked() {
     QLineEdit* edits[] = {edit1, edit2, edit3};
     QString text = edits[activeParam]->text();
     if (!text.contains('.')) edits[activeParam]->insert(".");
-}
-
-void MainWindow::onBackspaceClicked() {
-    if (activeParam < 0) return;
-    QLineEdit* edits[] = {edit1, edit2, edit3};
-    QString text = edits[activeParam]->text();
-    if (!text.isEmpty()) edits[activeParam]->setText(text.chopped(1));
 }
 
 void MainWindow::onClearInputClicked() {
@@ -319,8 +388,18 @@ void MainWindow::onCalculate() {
     case 9: res = a*a*a*PI*4.0/3.0; formula = QString("4/3×π×半径³ = 4/3×π×%1³").arg(a); break;
     }
 
-    resultLabel->setText(QString("结果：<b>%1</b><br><span style='color:#666;font-size:12px;'>公式：%2</span>")
+    QString graphName = graphCombo->currentText();
+    resultLabel->setText(QString("结果：<b>%1</b><br><span style='color:#666;font-size:13px;'>公式：%2</span>")
                              .arg(res).arg(formula));
+
+    QString record = QString("[%1] %2 | 参数: %3 | 结果: %4")
+                         .arg(QTime::currentTime().toString("HH:mm:ss"))
+                         .arg(graphName)
+                         .arg(formula)
+                         .arg(res);
+    historyList->addItem(record);
+    btnClearAllHistory->setEnabled(true);
+    saveHistory();
 }
 
 // ============================================================
@@ -328,7 +407,6 @@ void MainWindow::onCalculate() {
 // ============================================================
 void MainWindow::onClearAll() {
     graphCombo->setCurrentIndex(-1);
-
     activeParam = -1;
     label1->setStyleSheet(""); label2->setStyleSheet(""); label3->setStyleSheet("");
     edit1->clear(); edit2->clear(); edit3->clear();
@@ -336,4 +414,90 @@ void MainWindow::onClearAll() {
     label2->hide(); edit2->hide();
     label3->hide(); edit3->hide();
     resultLabel->setText("已清空，请重新选择图形");
+}
+
+// ============================================================
+//  复制结果
+// ============================================================
+void MainWindow::onCopyResult() {
+    QString text = resultLabel->text();
+    if (text.isEmpty() || text == "请先选择一个图形" || text == "已清空，请重新选择图形") {
+        resultLabel->setText("⚠️ 没有可复制的结果");
+        return;
+    }
+    QClipboard* clipboard = QApplication::clipboard();
+    clipboard->setText(text.remove(QRegularExpression("<[^>]*>")));
+    resultLabel->setText("✅ 结果已复制到剪贴板");
+}
+
+// ============================================================
+//  历史记录管理
+// ============================================================
+void MainWindow::onHistoryItemClicked(QListWidgetItem* item) {
+    Q_UNUSED(item);
+    btnDeleteHistory->setEnabled(true);
+}
+
+void MainWindow::onDeleteHistory() {
+    int row = historyList->currentRow();
+    if (row < 0) return;
+
+    QMessageBox::StandardButton ret =
+        QMessageBox::question(this, "删除历史",
+                              "确定删除这条记录吗？",
+                              QMessageBox::Yes | QMessageBox::No);
+    if (ret != QMessageBox::Yes) return;
+
+    delete historyList->takeItem(row);
+    if (historyList->count() == 0) {
+        btnDeleteHistory->setEnabled(false);
+        btnClearAllHistory->setEnabled(false);
+    }
+    saveHistory();
+}
+
+void MainWindow::onClearAllHistory() {
+    if (historyList->count() == 0) return;
+
+    QMessageBox::StandardButton ret =
+        QMessageBox::question(this, "清除全部",
+                              "确定清除所有历史记录吗？\n此操作不可撤销！",
+                              QMessageBox::Yes | QMessageBox::No);
+    if (ret != QMessageBox::Yes) return;
+
+    historyList->clear();
+    btnDeleteHistory->setEnabled(false);
+    btnClearAllHistory->setEnabled(false);
+    saveHistory();
+}
+
+// ============================================================
+//  持久化
+// ============================================================
+void MainWindow::saveHistory() {
+    QSettings settings("Byjsmc", "AreaVolumeCalculator");
+    QStringList list;
+    for (int i = 0; i < historyList->count(); ++i)
+        list.append(historyList->item(i)->text());
+    settings.setValue("history", list);
+}
+
+void MainWindow::loadHistory() {
+    QSettings settings("Byjsmc", "AreaVolumeCalculator");
+    QStringList list = settings.value("history").toStringList();
+    for (const auto& s : list)
+        historyList->addItem(s);
+    if (list.count() > 0)
+        btnClearAllHistory->setEnabled(true);
+}
+
+void MainWindow::saveConfig() {
+    QSettings settings("Byjsmc", "AreaVolumeCalculator");
+    settings.setValue("graphIndex", graphCombo->currentIndex());
+}
+
+void MainWindow::loadConfig() {
+    QSettings settings("Byjsmc", "AreaVolumeCalculator");
+    int idx = settings.value("graphIndex", -1).toInt();
+    if (idx >= 0) graphCombo->setCurrentIndex(idx);
 }
